@@ -4,7 +4,8 @@ import numpy as np
 import asyncio
 import aiohttp
 import json
-import ccxt.async_support as ccxt
+import ccxt.async_support as ccxt_async  # Renommé pour la version asynchrone
+import ccxt  # Version synchrone pour le portfolio
 import ta
 import plotly.express as px
 import plotly.graph_objects as go
@@ -78,7 +79,7 @@ def fetch_ohlcv_for_cryptos(crypto_list, timeframe="1d", limit=200):
         Returns:
             DataFrame: Un DataFrame contenant les dernières données OHLCV pour chaque paire.
         """
-        exchange = ccxt.bitmart(
+        exchange = ccxt_async.bitmart(  # Utilisation de ccxt_async ici
             {
                 "enableRateLimit": True,
             }
@@ -187,6 +188,16 @@ def aggregate_crypto_data(df_coingecko, df_bitmart):
 def main():
     st.set_page_config(page_title="Crypto Dashboard", layout="wide")
 
+    # Logo dans la barre latérale
+    st.sidebar.image(
+        "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTbih-00oWUiFEntl28hkDq-rHfqisKHJBhGg&s",
+        width=100
+    )
+
+    # Barre latérale pour la navigation
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Sélectionnez une page:", ["Page 1", "Mon Portfolio"])
+
     # Création de deux colonnes pour les sélecteurs
     col1, col2 = st.columns([1, 2])
 
@@ -212,10 +223,6 @@ def main():
             options=df_coingecko_initial['symbol'].tolist(),
             help="Sélectionnez les cryptomonnaies à exclure du tableau et des graphiques"
         )
-
-    # Barre latérale pour la navigation
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Sélectionnez une page:", ["Page 1"])
 
     # Contenu principal
     st.title("Tableau de bord Crypto")
@@ -290,7 +297,103 @@ def main():
         )
     }
 
+    if page == "Mon Portfolio":
+        st.title("Mon Portfolio Bitmart")
+        
+        # Configuration des clés API dans la sidebar
+        with st.sidebar:
+            st.subheader("Configuration API Bitmart")
+            api_key = st.text_input("API Key", type="password")
+            api_secret = st.text_input("API Secret", type="password")
+            api_password = st.text_input("API Password", type="password")
+            
+        if api_key and api_secret and api_password:
+            # Bouton pour charger les données
+            if st.button("Charger mon portfolio"):
+                try:
+                    with st.spinner("Chargement de votre portfolio..."):
+                        # Utilisation de ccxt synchrone
+                        exchange = ccxt.bitmart({
+                            'apiKey': api_key,
+                            'secret': api_secret,
+                            'uid': api_password,  # need uid for bitmart
+                            'enableRateLimit': True
+                        })
+                        
+                        # Récupération de la balance
+                        balance = exchange.fetch_balance()
+                        
+                        # Filtrage des balances non nulles
+                        non_zero_balances = {
+                            currency: float(data['total'])
+                            for currency, data in balance.items()
+                            if isinstance(data, dict) and 
+                            data.get('total', 0) is not None and 
+                            float(data.get('total', 0)) > 0 and
+                            currency not in ['total', 'used', 'free', 'info']
+                        }
+                        
+                        if non_zero_balances:
+                            # Création du pie chart
+                            fig = go.Figure(data=[go.Pie(
+                                labels=list(non_zero_balances.keys()),
+                                values=list(non_zero_balances.values()),
+                                hole=.3,
+                                textinfo='label+percent'
+                            )])
+                            
+                            # Personnalisation du layout
+                            fig.update_layout(
+                                title="Répartition de mon Portfolio",
+                                template="plotly_dark",
+                                showlegend=True,
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)'
+                            )
+                            
+                            # Affichage du pie chart
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Affichage du tableau des balances
+                            df_balance = pd.DataFrame(list(non_zero_balances.items()), columns=['Crypto', 'Quantité'])
+                            st.dataframe(
+                                df_balance,
+                                column_config={
+                                    "Crypto": st.column_config.TextColumn("Crypto", width="medium"),
+                                    "Quantité": st.column_config.NumberColumn("Quantité", format="%.8f")
+                                },
+                                hide_index=True,
+                                use_container_width=True
+                            )
+                        else:
+                            st.warning("Aucune balance non nulle trouvée dans votre compte.")
+                            
+                except Exception as e:
+                    st.error(f"Erreur lors de la récupération des données: {str(e)}")
+        else:
+            st.info("Veuillez entrer vos clés API Bitmart dans la barre latérale pour voir votre portfolio.")
+
     if page == "Page 1":
+        # Dictionnaire de correspondance pour les noms des colonnes
+        column_names = {
+            "market_cap_rank": "Rang",
+            "current_price": "Prix",
+            "market_cap": "Market Cap",
+            "ath": "ATH",
+            "ath_change_percentage": "Distance à l'ATH",
+            "rsi_14": "RSI 14",
+            "ema_200_gap": "Écart EMA 200",
+            "sharpe_ratio": "Sharpe Ratio",
+            "mean_return": "Moyenne de retour",
+            "std_return": "Écart-type de retour",
+            "price_change_percentage_24h_in_currency": "Variation 24h",
+            "price_change_percentage_7d_in_currency": "Variation 7j",
+            "price_change_percentage_14d_in_currency": "Variation 14j",
+            "price_change_percentage_30d_in_currency": "Variation 30j",
+            "price_change_percentage_200d_in_currency": "Variation 200j",
+            "price_change_percentage_1y_in_currency": "Variation 1an"
+        }
+
         # Application du style conditionnel pour plusieurs colonnes
         def color_bollinger(val):
             if val == "Oui":
@@ -348,7 +451,8 @@ def main():
         with col1:
             x_column = st.selectbox(
                 "Choisir la variable X",
-                numeric_columns,
+                options=numeric_columns,
+                format_func=lambda x: column_names.get(x, x),
                 index=(
                     numeric_columns.index("mean_return")
                     if "mean_return" in numeric_columns
@@ -359,7 +463,8 @@ def main():
         with col2:
             y_column = st.selectbox(
                 "Choisir la variable Y",
-                numeric_columns,
+                options=numeric_columns,
+                format_func=lambda x: column_names.get(x, x),
                 index=(
                     numeric_columns.index("std_return")
                     if "std_return" in numeric_columns
@@ -367,17 +472,17 @@ def main():
                 ),
             )
 
-        # Création du scatter plot
+        # Création du scatter plot avec les noms d'affichage
         fig_scatter = px.scatter(
             df_merged,
             x=x_column,
             y=y_column,
             text="symbol",
-            title=f"Relation entre {x_column} et {y_column}",
+            title=f"Relation entre {column_names.get(x_column, x_column)} et {column_names.get(y_column, y_column)}",
             template="plotly_dark",
-            color="symbol",  # Couleur différente pour chaque symbole
-            color_discrete_sequence=px.colors.qualitative.Set3,  # Palette de couleurs
-            hover_data=["name", x_column, y_column]  # Données additionnelles au survol
+            color="symbol",
+            color_discrete_sequence=px.colors.qualitative.Set3,
+            hover_data=["name", x_column, y_column]
         )
 
         # Ajustement du texte au-dessus des points
@@ -401,21 +506,22 @@ def main():
 
         y_column_bar = st.selectbox(
             "Choisir la variable à afficher",
-            numeric_columns,
+            options=numeric_columns,
+            format_func=lambda x: column_names.get(x, x),
             index=numeric_columns.index("rsi_14") if "rsi_14" in numeric_columns else 0,
         )
 
-        # Création du bar plot avec dégradé de couleurs
+        # Création du bar plot avec le nom d'affichage
         fig_bar = px.bar(
             df_merged,
             x="symbol",
             y=y_column_bar,
-            title=f"{y_column_bar} par Crypto",
+            title=f"{column_names.get(y_column_bar, y_column_bar)} par Crypto",
             template="plotly_dark",
             text_auto=".2s",
-            color=y_column_bar,  # Utiliser la valeur pour le dégradé
-            color_continuous_scale="Viridis",  # Choix du dégradé de couleurs
-            hover_data=["name", y_column_bar]  # Données additionnelles au survol
+            color=y_column_bar,
+            color_continuous_scale="Viridis",
+            hover_data=["name", y_column_bar]
         )
 
         # Personnalisation du bar plot

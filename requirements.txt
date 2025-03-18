@@ -1,7 +1,8 @@
-pandas
-requests
-ccxt
-ta
-streamlit
-aiohttp
-plotly
+pandas>=2.0.0
+requests>=2.31.0
+ccxt>=4.1.13
+ta>=0.10.2
+streamlit>=1.31.0
+aiohttp>=3.9.1
+plotly>=5.18.0
+numpy>=1.24.0

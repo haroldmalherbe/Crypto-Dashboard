@@ -68,67 +68,62 @@ async def fetch_single_ohlcv(exchange, symbol, timeframe, limit, base):
 @st.cache_data(ttl=3600)
 def fetch_ohlcv_for_cryptos(crypto_list, timeframe="1d", limit=200):
     async def fetch(crypto_list, timeframe="1d", limit=200):
-        """
-        Récupère les bougies OHLCV pour chaque paire spot en USDT de manière concurrente.
-
-        Parameters:
-            crypto_list (list): Liste de chaînes de caractères représentant les cryptomonnaies recherchées (ex. ['BTC', 'ETH']).
-            timeframe (str): La période de temps des bougies (ex. '1h', '1d', etc.).
-            limit (int): Le nombre maximum de bougies à récupérer.
-
-        Returns:
-            DataFrame: Un DataFrame contenant les dernières données OHLCV pour chaque paire.
-        """
-        exchange = ccxt_async.bitmart(  # Utilisation de ccxt_async ici
-            {
-                "enableRateLimit": True,
-            }
-        )
+        exchange = ccxt_async.bitmart({
+            "enableRateLimit": True,
+            "timeout": 30000,  # Augmentation du timeout
+        })
 
         try:
             await exchange.load_markets()
             tasks = []
 
-            # Création des tâches pour chaque paire valide
             for symbol, market in exchange.markets.items():
                 if (
                     market.get("spot", False)
                     and market.get("quote") == "USDT"
                     and market.get("base") in crypto_list
                 ):
-                    print(f"Préparation de la récupération pour {symbol}...")
                     tasks.append(
                         fetch_single_ohlcv(
                             exchange, symbol, timeframe, limit, market.get("base")
                         )
                     )
 
-            # Exécution concurrente de toutes les tâches
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Traitement des résultats
             valid_results = []
-            for df in results:
-                if df is not None and not isinstance(df, Exception):
-                    df["rsi_14"] = ta.momentum.rsi(df["close"], window=14)
-                    df["return"] = df["close"].pct_change()
-                    last_row = df.iloc[-1]
-                    mean_return = df["return"].mean()
-                    std_return = df["return"].std()
-                    sharpe_ratio = (365**0.5) * (mean_return / std_return)
-                    valid_results.append(
-                        last_row.to_dict()
-                        | {
-                            "sharpe_ratio": sharpe_ratio,
-                            "mean_return": mean_return * 100,
-                            "std_return": std_return * 100,
-                            "in_bollinger_bands": last_row["in_bollinger_bands"],
-                            "ema_200_gap": last_row["ema_200_gap"]
-                        }
-                    )
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Erreur lors de la récupération des données: {result}")
+                    continue
+                if result is not None:
+                    try:
+                        df = result
+                        df["rsi_14"] = ta.momentum.rsi(df["close"], window=14)
+                        df["return"] = df["close"].pct_change()
+                        last_row = df.iloc[-1]
+                        mean_return = df["return"].mean()
+                        std_return = df["return"].std()
+                        sharpe_ratio = (365**0.5) * (mean_return / std_return) if std_return != 0 else 0
+                        valid_results.append(
+                            last_row.to_dict()
+                            | {
+                                "sharpe_ratio": sharpe_ratio,
+                                "mean_return": mean_return * 100,
+                                "std_return": std_return * 100,
+                                "in_bollinger_bands": last_row["in_bollinger_bands"],
+                                "ema_200_gap": last_row["ema_200_gap"]
+                            }
+                        )
+                    except Exception as e:
+                        print(f"Erreur lors du traitement des données: {e}")
+                        continue
 
-            return pd.DataFrame(valid_results)
+            return pd.DataFrame(valid_results) if valid_results else pd.DataFrame()
 
+        except Exception as e:
+            print(f"Erreur générale: {e}")
+            return pd.DataFrame()
         finally:
             await exchange.close()
 

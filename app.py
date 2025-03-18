@@ -392,18 +392,18 @@ def main():
         # Application du style conditionnel pour plusieurs colonnes
         def color_bollinger(val):
             if val == "Oui":
-                return 'background-color: #90EE90'
+                return 'background-color: #FF0000'
             elif val == "Non":
-                return 'background-color: #FFB6C1'
+                return 'background-color: #15B01A'
             return ''
 
         def color_rsi(val):
             try:
                 val = float(val)
                 if val > 70:
-                    return 'background-color: #90EE90'
+                    return 'background-color: #FF0000'
                 elif val < 30:
-                    return 'background-color: #FFB6C1'
+                    return 'background-color: #15B01A'
             except:
                 pass
             return ''
@@ -412,9 +412,9 @@ def main():
             try:
                 val = float(val)
                 if val > 0:
-                    return 'background-color: #90EE90'
+                    return 'background-color: #FF0000'
                 elif val < 0:
-                    return 'background-color: #FFB6C1'
+                    return 'background-color: #15B01A'
             except:
                 pass
             return ''
